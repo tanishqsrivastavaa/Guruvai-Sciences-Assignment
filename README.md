@@ -77,3 +77,59 @@ The current implementation is not thread-safe because a `get` or `put` call invo
 - **Reader-writer lock**: if reads (`get`) vastly outnumber writes (`put`), a reader-writer lock allows multiple concurrent readers while still serialising writers.
 
 For a Python implementation, a `threading.Lock` acquired at the start of each public method and released on exit (using a `with` statement) is the idiomatic and safest starting point.
+
+---
+
+## Detailed Complexity & Design Notes
+
+### 1. Time & Space Complexity Analysis
+
+#### Problem 1: LRU Cache
+
+| Function | Time Complexity | Space Complexity | Reasoning |
+|---|---|---|---|
+| `get(key)` | O(1) | O(1) | Hash map lookup and DLL pointer re-assignment are constant time. |
+| `put(key, val)` | O(1) | O(1) | Adding/removing nodes in a DLL and map insertion are constant time. |
+| Overall | O(1) | O(N) | We store N nodes in the map and the list, where N is the capacity. |
+
+#### Problem 2: Event Scheduler
+
+| Function | Time Complexity | Space Complexity | Reasoning |
+|---|---|---|---|
+| `can_attend_all` | O(N log N) | O(N) | Dominated by sorting. Python's Timsort uses O(N) space in the worst case. |
+| `min_rooms_required` | O(N log N) | O(N) | Requires sorting two separate lists of size N. |
+
+---
+
+### 2. Trade-offs: The Hash Map + DLL Duo
+
+The combination is used because it solves the **"Search vs. Update"** conflict:
+
+- **Hash Map alone**: Provides O(1) access, but has no concept of order. To find the "least recently used" item, you'd have to search the whole map — O(N).
+- **Linked List alone**: Maintains order perfectly. However, to find a specific key, you must traverse the list — O(N).
+- **The Hybrid**: The Hash Map stores pointers to the List nodes. This gives us the speed of a map with the ordering of a list. The *Doubly* part of the list is essential; it allows a node to remove itself in O(1) because it knows its own neighbours.
+
+---
+
+### 3. Future Proofing: Assigning Room Names
+
+To assign specific rooms (e.g. "Room A", "Room B"), replace the simple counter with a **Min-Heap (Priority Queue)** tracking occupied rooms by end time:
+
+1. Store room names in a **"Free Rooms" pool**.
+2. Use a **Min-Heap** to track currently occupied rooms, keyed by their end times.
+3. For each new meeting:
+   - **Check the Heap**: Has any room's end time passed? If yes, move that room name back to the Free Rooms pool.
+   - **Assign a room** from the Free Rooms pool to the current meeting.
+   - **Push** the meeting's end time and assigned room name back into the Heap.
+
+---
+
+### 4. Concurrency: Making it Thread-Safe
+
+In a multi-threaded environment, the LRU Cache would suffer from **race conditions** — two threads trying to update the same pointers simultaneously.
+
+**Required changes:**
+
+- **Locks (Mutex)**: Wrap `get` and `put` logic in a `threading.Lock()`. This ensures only one thread can modify the pointers at a time.
+- **Granular Locking**: For higher performance, use a **Read-Write Lock**. Multiple threads could read (`get`) concurrently, but only one could write (`put` or move a node).
+- **Atomic Operations**: In some languages you might use atomic pointers, but in Python a standard `Lock` is the idiomatic approach for thread safety.
